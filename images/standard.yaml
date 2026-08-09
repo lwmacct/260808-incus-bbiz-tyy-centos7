@@ -401,7 +401,12 @@ actions:
       __install_tyy_kernel
       __configure_boot
       __configure_runtime_repositories
-      sed -i 's/^SELINUX=.*/SELINUX=disabled/' /etc/selinux/config
+      mkdir -p /etc/selinux
+      if [ -f /etc/selinux/config ]; then
+        sed -i 's/^SELINUX=.*/SELINUX=disabled/' /etc/selinux/config
+      else
+        printf '%s\n' SELINUX=disabled SELINUXTYPE=targeted > /etc/selinux/config
+      fi
       grep SELINUX= /etc/selinux/config
       __reset_machine_id
 
