@@ -1,0 +1,96 @@
+name: Test VM network on Incus managed bridge
+
+on:
+  workflow_run:
+    workflows:
+      - Build Incus VM image
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Incus VM image tag in GHCR
+        required: false
+        default: artifact-standard-latest
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: centos7-tyy-kernel-incus-vm-network-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DEFAULT_IMAGE_TAG: artifact-standard-latest
+  KERNEL_RELEASE: 6.1.0-2.3.ctl3.x86_64
+  VM_DISK_TOTAL_BYTES: "107374182400"
+
+jobs:
+  network:
+    name: Published VM / Incus managed bridge / host reserves 4 GiB
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Prepare Incus VM test environment
+        uses: ./.github/actions/incus-vm-common
+        with:
+          image_tag: ${{ github.event.inputs.image_tag || env.DEFAULT_IMAGE_TAG }}
+          image_dir_name: published-incus-image
+          forward_incus: "true"
+          registry_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Start VM and test Incus managed networking
+        shell: bash
+        env:
+          NETWORK_LABEL: Incus managed bridge
+          # GitHub-hosted runners cannot reliably reach mainland mirrors.
+          REQUIRE_CENTOS_MIRROR: "false"
+        run: |
+          __cleanup() {
+            sudo incus delete --force "${_test_instance}" 2>/dev/null || true
+            sudo incus image delete "${_test_image}" 2>/dev/null || true
+          }
+
+          __main() {
+            set -euo pipefail
+
+            _test_image="network-centos7-tyy-kernel-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            _test_instance="${_test_image}-instance"
+            trap __cleanup EXIT HUP INT TERM
+
+            sudo incus image import \
+              "${IMAGE_DIR}/incus.tar.xz" \
+              "${IMAGE_DIR}/disk.qcow2" \
+              --alias "${_test_image}"
+            sudo incus image list "${_test_image}" --format=json \
+              | jq -e '
+                length == 1
+                and .[0].type == "virtual-machine"
+                and .[0].properties["requirements.cdrom_agent"] == "true"
+                and .[0].properties["requirements.secureboot"] == "false"
+              '
+            sudo incus init "${_test_image}" "${_test_instance}" \
+              --quiet \
+              --vm \
+              -c security.secureboot=false \
+              -c limits.cpu="${VM_CPU_COUNT}" \
+              -c limits.memory="${VM_MEMORY_LIMIT}"
+            sudo incus config device add "${_test_instance}" agent disk \
+              source=agent:config
+            sudo incus start "${_test_instance}"
+
+            export TEST_INSTANCE="${_test_instance}"
+            export NETWORK_INTERFACE=eth0
+            bash scripts/incus-vm-network-check.sh
+            sudo incus stop --force "${_test_instance}"
+          }
+
+          __main "$@"

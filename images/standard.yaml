@@ -1,0 +1,413 @@
+# Derived from the lxc/lxc-ci CentOS image definition at
+# 5826c344bfac81dbdef0d54f56ef90d907bd2591 and specialized for
+# CentOS Linux 7.9.2009 amd64 Incus VMs with the Tianyi Cloud kernel.
+image:
+  distribution: centos
+
+source:
+  downloader: centos-http
+  # distrobuilder v3.3.1 only permits three-part CentOS releases when this
+  # URL contains vault.centos.org. Runtime yum repositories are configured
+  # separately below for mainland China.
+  url: https://vault.centos.org/
+  variant: minimal
+  keys:
+  # RPM-GPG-KEY-CentOS-7, from the CentOS archive.
+  - |-
+    -----BEGIN PGP PUBLIC KEY BLOCK-----
+    Version: GnuPG v1.4.5 (GNU/Linux)
+
+    mQINBFOn/0sBEADLDyZ+DQHkcTHDQSE0a0B2iYAEXwpPvs67cJ4tmhe/iMOyVMh9
+    Yw/vBIF8scm6T/vPN5fopsKiW9UsAhGKg0epC6y5ed+NAUHTEa6pSOdo7CyFDwtn
+    4HF61Esyb4gzPT6QiSr0zvdTtgYBRZjAEPFVu3Dio0oZ5UQZ7fzdZfeixMQ8VMTQ
+    4y4x5vik9B+cqmGiq9AW71ixlDYVWasgR093fXiD9NLT4DTtK+KLGYNjJ8eMRqfZ
+    Ws7g7C+9aEGHfsGZ/SxLOumx/GfiTloal0dnq8TC7XQ/JuNdB9qjoXzRF+faDUsj
+    WuvNSQEqUXW1dzJjBvroEvgTdfCJfRpIgOrc256qvDMp1SxchMFltPlo5mbSMKu1
+    x1p4UkAzx543meMlRXOgx2/hnBm6H6L0FsSyDS6P224yF+30eeODD4Ju4BCyQ0jO
+    IpUxmUnApo/m0eRelI6TRl7jK6aGqSYUNhFBuFxSPKgKYBpFhVzRM63Jsvib82rY
+    438q3sIOUdxZY6pvMOWRkdUVoz7WBExTdx5NtGX4kdW5QtcQHM+2kht6sBnJsvcB
+    JYcYIwAUeA5vdRfwLKuZn6SgAUKdgeOtuf+cPR3/E68LZr784SlokiHLtQkfk98j
+    NXm6fJjXwJvwiM2IiFyg8aUwEEDX5U+QOCA0wYrgUQ/h8iathvBJKSc9jQARAQAB
+    tEJDZW50T1MtNyBLZXkgKENlbnRPUyA3IE9mZmljaWFsIFNpZ25pbmcgS2V5KSA8
+    c2VjdXJpdHlAY2VudG9zLm9yZz6JAjUEEwECAB8FAlOn/0sCGwMGCwkIBwMCBBUC
+    CAMDFgIBAh4BAheAAAoJECTGqKf0qA61TN0P/2730Th8cM+d1pEON7n0F1YiyxqG
+    QzwpC2Fhr2UIsXpi/lWTXIG6AlRvrajjFhw9HktYjlF4oMG032SnI0XPdmrN29lL
+    F+ee1ANdyvtkw4mMu2yQweVxU7Ku4oATPBvWRv+6pCQPTOMe5xPG0ZPjPGNiJ0xw
+    4Ns+f5Q6Gqm927oHXpylUQEmuHKsCp3dK/kZaxJOXsmq6syY1gbrLj2Anq0iWWP4
+    Tq8WMktUrTcc+zQ2pFR7ovEihK0Rvhmk6/N4+4JwAGijfhejxwNX8T6PCuYs5Jiv
+    hQvsI9FdIIlTP4XhFZ4N9ndnEwA4AH7tNBsmB3HEbLqUSmu2Rr8hGiT2Plc4Y9AO
+    aliW1kOMsZFYrX39krfRk2n2NXvieQJ/lw318gSGR67uckkz2ZekbCEpj/0mnHWD
+    3R6V7m95R6UYqjcw++Q5CtZ2tzmxomZTf42IGIKBbSVmIS75WY+cBULUx3PcZYHD
+    ZqAbB0Dl4MbdEH61kOI8EbN/TLl1i077r+9LXR1mOnlC3GLD03+XfY8eEBQf7137
+    YSMiW5r/5xwQk7xEcKlbZdmUJp3ZDTQBXT06vavvp3jlkqqH9QOE8ViZZ6aKQLqv
+    pL+4bs52jzuGwTMT7gOR5MzD+vT0fVS7Xm8MjOxvZgbHsAgzyFGlI1ggUQmU7lu3
+    uPNL0eRx4S1G4Jn5
+    =OGYX
+    -----END PGP PUBLIC KEY BLOCK-----
+
+targets:
+  lxc:
+    create_message: |-
+      You just created an {{ image.description }} container.
+    config:
+    - type: all
+      before: 5
+      content: |-
+        lxc.include = LXC_TEMPLATE_CONFIG/centos.common.conf
+    - type: user
+      before: 5
+      content: |-
+        lxc.include = LXC_TEMPLATE_CONFIG/centos.userns.conf
+    - type: all
+      after: 4
+      content: |-
+        lxc.include = LXC_TEMPLATE_CONFIG/common.conf
+    - type: user
+      after: 4
+      content: |-
+        lxc.include = LXC_TEMPLATE_CONFIG/userns.conf
+    - type: all
+      content: |-
+        lxc.arch = {{ image.architecture_kernel }}
+    incus:
+      vm:
+      # The image contains only an EFI partition and a root partition.
+      size: 107374182400
+      filesystem: ext4
+
+files:
+- path: /var/lib/distrobuilder/tyy-kernel-6.1.0-2.3.x86_64.tar.bz2
+  generator: copy
+  source: /var/tmp/tyy-kernel-6.1.0-2.3.x86_64.tar.bz2
+  mode: "0644"
+
+- path: /etc/hostname
+  generator: hostname
+
+- path: /etc/hosts
+  generator: hosts
+
+- path: /etc/machine-id
+  generator: dump
+  content: uninitialized
+
+- path: /etc/fstab
+  generator: dump
+
+- path: /var/lib/dbus/machine-id
+  generator: remove
+
+- path: /etc/sysconfig/network
+  generator: template
+  content: |-
+    NETWORKING=yes
+    HOSTNAME={{ container.name }}
+
+- path: /etc/sysconfig/network-scripts/ifcfg-eth0
+  generator: template
+  content: |-
+    DEVICE=enp5s0
+    BOOTPROTO=dhcp
+    ONBOOT=yes
+    HOSTNAME={{ container.name }}
+    TYPE=Ethernet
+    MTU=
+    DHCP_HOSTNAME={{ container.name }}
+  types:
+  - vm
+
+- path: /etc/default/grub
+  generator: dump
+  content: |-
+    GRUB_DEFAULT=saved
+    GRUB_RECORDFAIL_TIMEOUT=0
+    GRUB_TIMEOUT=0
+    GRUB_CMDLINE_LINUX_DEFAULT="${GRUB_CMDLINE_LINUX_DEFAULT} console=tty1 console=ttyS0"
+    GRUB_TERMINAL=console
+    GRUB_DISABLE_OS_PROBER=true
+  types:
+  - vm
+
+- path: /etc/dracut.conf.d/incus.conf
+  generator: dump
+  content: |-
+    add_drivers+=" virtio_scsi virtio_console "
+  types:
+  - vm
+
+- generator: fstab
+  types:
+  - vm
+
+- path: /etc/systemd/system/incus-agent-workaround.service
+  generator: dump
+  content: |-
+    [Unit]
+    Description=Incus - agent (CentOS 7 workaround)
+    Before=incus-agent.service
+
+    [Service]
+    Type=oneshot
+    ExecStart=-/bin/mkdir /run/incus_agent
+
+    [Install]
+    WantedBy=multi-user.target
+  types:
+  - vm
+
+- path: /etc/systemd/system/incus-agent.service.d/incus.conf
+  generator: dump
+  content: |-
+    [Service]
+    WorkingDirectory=/run/incus_agent
+  types:
+  - vm
+
+- generator: incus-agent
+  types:
+  - vm
+
+packages:
+  manager: yum
+  update: true
+  cleanup: true
+  sets:
+  - packages:
+    - cronie
+    - curl
+    - hostname
+    - initscripts
+    - iproute
+    - openssh-clients
+    - passwd
+    - policycoreutils
+    - rootfiles
+    - sudo
+    - rsyslog
+    - vim-minimal
+    action: install
+
+  - packages:
+    - dhclient
+    action: install
+
+  - packages:
+    - cronie-noanacron
+    action: install
+
+  - packages:
+    - NetworkManager
+    - shim
+    - irqbalance
+    - grub2-efi-x64
+    - grubby
+    action: install
+    types:
+    - vm
+
+  - packages:
+    - selinux-policy
+    - selinux-policy-targeted
+    action: remove
+
+actions:
+- trigger: post-unpack
+  action: |-
+    #!/bin/sh
+
+    __main() {
+      set -eux
+
+      touch /etc/hosts /etc/hostname
+
+      # Keep the build on the official Vault. The final image switches to the
+      # mainland mirror pool in the post-files action below.
+      cat > /etc/yum.repos.d/CentOS-Base.repo <<'EOF'
+    [base]
+    name=CentOS 7.9.2009 - Base
+    baseurl=https://vault.centos.org/7.9.2009/os/$basearch/
+    enabled=1
+    gpgcheck=1
+    gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-centosofficial
+
+    [updates]
+    name=CentOS 7.9.2009 - Updates
+    baseurl=https://vault.centos.org/7.9.2009/updates/$basearch/
+    enabled=1
+    gpgcheck=1
+    gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-centosofficial
+
+    [extras]
+    name=CentOS 7.9.2009 - Extras
+    baseurl=https://vault.centos.org/7.9.2009/extras/$basearch/
+    enabled=1
+    gpgcheck=1
+    gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-centosofficial
+    EOF
+    }
+
+    __main "$@"
+
+- trigger: post-packages
+  action: |-
+    #!/bin/sh
+
+    __main() {
+      set -eux
+
+      mkdir -p /selinux
+      echo 0 > /selinux/enforce
+      sed -i '/^session.*pam_loginuid.so/s/^session/# session/' /etc/pam.d/*
+    }
+
+    __main "$@"
+
+- trigger: post-files
+  action: |-
+    #!/bin/sh
+
+    __prepare_machine_id() {
+      : > /etc/machine-id
+      rm -f /var/lib/dbus/machine-id
+      systemd-machine-id-setup
+      test -s /etc/machine-id
+    }
+
+    __reset_machine_id() {
+      printf 'uninitialized\n' > /etc/machine-id
+      rm -f /var/lib/dbus/machine-id
+    }
+
+    __install_tyy_kernel() {
+      _kernel_archive=kernel-6.1.0-2.3.x86_64.tar.bz2
+      _kernel_archive_sha256=9e7cff72a92b96ddf52315015f3e04333c6324285a2145f50a8377cf267c8f6d
+      _kernel_package=kernel-6.1.0-2.3.ctl3.x86_64.rpm
+      _kernel_package_sha256=71efae39206f2eaa1c2b14bcfe392844392e35ce0b705cf3967c5be4327d40d3
+      _kernel_dir=/tmp/tyy-kernel
+      _staged_archive=/var/lib/distrobuilder/tyy-kernel-6.1.0-2.3.x86_64.tar.bz2
+      _epel_key=/etc/pki/rpm-gpg/RPM-GPG-KEY-EPEL-7
+
+      mkdir -p "${_kernel_dir}"
+      if [ ! -s "${_epel_key}" ]; then
+        curl -fsSL --retry 3 --retry-delay 2 \
+          -o "${_epel_key}" \
+          https://dl.fedoraproject.org/pub/epel/RPM-GPG-KEY-EPEL-7
+      fi
+      rpm --import "${_epel_key}"
+      yum clean all
+      cp -- "${_staged_archive}" "${_kernel_dir}/${_kernel_archive}"
+
+      (
+        cd "${_kernel_dir}"
+        printf '%s  %s\n' "${_kernel_archive_sha256}" "${_kernel_archive}" \
+          | sha256sum --check --strict
+        tar -xjf "${_kernel_archive}"
+        test -f "kernel_install_610_23_local_lcdn/${_kernel_package}"
+        printf '%s  %s\n' "${_kernel_package_sha256}" \
+          "kernel_install_610_23_local_lcdn/${_kernel_package}" \
+          | sha256sum --check --strict
+      )
+
+      # The kernel artifact is unsigned; the pinned archive and RPM digests provide
+      # reproducibility while rpm installs the package's own kernel scriptlets.
+      rpm -ivh --force \
+        "${_kernel_dir}/kernel_install_610_23_local_lcdn/${_kernel_package}"
+      rpm -q kernel-6.1.0-2.3.ctl3.x86_64
+
+      yum clean all
+      rm -rf "${_kernel_dir}"
+      rm -f "${_staged_archive}"
+    }
+
+    __cleanup_firmware_mount() {
+      if mountpoint -q /sys/firmware; then
+        umount /sys/firmware
+      fi
+    }
+
+    __configure_boot() {
+      _kernel_version=6.1.0-2.3.ctl3.x86_64
+
+      test -f "/boot/vmlinuz-${_kernel_version}"
+      depmod -a "${_kernel_version}"
+      dracut --kver "${_kernel_version}" --force
+
+      trap __cleanup_firmware_mount EXIT HUP INT TERM
+      mount -t tmpfs tmpfs /sys/firmware
+      mkdir -p /sys/firmware/efi
+
+      _grub_target="$(readlink -f /etc/grub2-efi.cfg)"
+      grub2-mkconfig -o "${_grub_target}"
+      sed -i "s#root=[^ ]*#root=${DISTROBUILDER_ROOT_UUID}#g" "${_grub_target}"
+      grubby --set-default "/boot/vmlinuz-${_kernel_version}"
+
+      _default_kernel="$(grubby --default-kernel)"
+      test "${_default_kernel}" = "/boot/vmlinuz-${_kernel_version}"
+
+      umount /sys/firmware
+      trap - EXIT HUP INT TERM
+    }
+
+    __configure_runtime_repositories() {
+      mkdir -p /etc/yum.repos.d/disabled
+      find /etc/yum.repos.d -maxdepth 1 -type f -name '*.repo' \
+        -exec mv -t /etc/yum.repos.d/disabled -- {} +
+      cat > /etc/yum.repos.d/CentOS-Base.repo <<'EOF'
+    [base]
+    name=CentOS 7.9.2009 - Base - Mainland China
+    baseurl=https://mirrors.cloud.tencent.com/centos-vault/7.9.2009/os/$basearch/
+            https://mirrors.aliyun.com/centos-vault/7.9.2009/os/$basearch/
+            https://mirrors.huaweicloud.com/centos-vault/7.9.2009/os/$basearch/
+            https://mirrors.nju.edu.cn/centos-vault/7.9.2009/os/$basearch/
+            https://mirrors.hit.edu.cn/centos-vault/7.9.2009/os/$basearch/
+    enabled=1
+    gpgcheck=1
+    gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-centosofficial
+    failovermethod=priority
+
+    [updates]
+    name=CentOS 7.9.2009 - Updates - Mainland China
+    baseurl=https://mirrors.cloud.tencent.com/centos-vault/7.9.2009/updates/$basearch/
+            https://mirrors.aliyun.com/centos-vault/7.9.2009/updates/$basearch/
+            https://mirrors.huaweicloud.com/centos-vault/7.9.2009/updates/$basearch/
+            https://mirrors.nju.edu.cn/centos-vault/7.9.2009/updates/$basearch/
+            https://mirrors.hit.edu.cn/centos-vault/7.9.2009/updates/$basearch/
+    enabled=1
+    gpgcheck=1
+    gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-centosofficial
+    failovermethod=priority
+
+    [extras]
+    name=CentOS 7.9.2009 - Extras - Mainland China
+    baseurl=https://mirrors.cloud.tencent.com/centos-vault/7.9.2009/extras/$basearch/
+            https://mirrors.aliyun.com/centos-vault/7.9.2009/extras/$basearch/
+            https://mirrors.huaweicloud.com/centos-vault/7.9.2009/extras/$basearch/
+            https://mirrors.nju.edu.cn/centos-vault/7.9.2009/extras/$basearch/
+            https://mirrors.hit.edu.cn/centos-vault/7.9.2009/extras/$basearch/
+    enabled=1
+    gpgcheck=1
+    gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-centosofficial
+    failovermethod=priority
+    EOF
+      yum clean all
+    }
+
+    __main() {
+      set -eux
+
+      # Kernel RPM scriptlets require a valid ID; guests must generate their own.
+      __prepare_machine_id
+      __install_tyy_kernel
+      __configure_boot
+      __configure_runtime_repositories
+      sed -i 's/^SELINUX=.*/SELINUX=disabled/' /etc/selinux/config
+      grep SELINUX= /etc/selinux/config
+      __reset_machine_id
+
+      systemctl enable NetworkManager.service
+      systemctl enable incus-agent-workaround.service
+      rm -Rf /var/lib/selinux/*
+      systemctl mask systemd-firstboot.service
+    }
+
+    __main "$@"

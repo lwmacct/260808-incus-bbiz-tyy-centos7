@@ -1,0 +1,172 @@
+name: Prepare Incus VM test environment
+description: Install Incus/QEMU, pull a published VM image, and allocate runner resources
+inputs:
+  image_tag:
+    description: Published GHCR image tag
+    required: true
+  image_dir_name:
+    description: Temporary directory name for the published image
+    required: false
+    default: published-incus-image
+  forward_incus:
+    description: Allow Incus bridge traffic through the Docker forwarding chain
+    required: false
+    default: "false"
+  registry_token:
+    description: Token used to read the GHCR package
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Install Incus and QEMU
+      shell: bash
+      run: |
+        __main() {
+          set -euo pipefail
+
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            ca-certificates \
+            curl \
+            dnsmasq-base \
+            iptables \
+            iputils-ping \
+            jq \
+            ovmf \
+            qemu-system-modules-spice \
+            qemu-system-x86 \
+            qemu-utils
+          sudo mkdir -p /etc/apt/keyrings
+          sudo curl -fsSL https://pkgs.zabbly.com/key.asc \
+            -o /etc/apt/keyrings/zabbly.asc
+          sudo tee /etc/apt/sources.list.d/zabbly-incus-stable.sources >/dev/null <<EOF
+        Enabled: yes
+        Types: deb
+        URIs: https://pkgs.zabbly.com/incus/stable
+        Suites: $(. /etc/os-release && echo "${VERSION_CODENAME}")
+        Components: main
+        Architectures: $(dpkg --print-architecture)
+        Signed-By: /etc/apt/keyrings/zabbly.asc
+        EOF
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends incus
+        }
+
+        __main "$@"
+
+    - name: Setup Incus
+      shell: bash
+      if: ${{ inputs.forward_incus == 'true' }}
+      run: |
+        __main() {
+          set -euo pipefail
+
+          sudo systemctl enable --now incus.socket
+          sudo incus admin waitready
+          sudo incus admin init --minimal
+
+          _forward_chain=FORWARD
+          if sudo iptables --wait 5 --numeric --list DOCKER-USER \
+            >/dev/null 2>&1; then
+            _forward_chain=DOCKER-USER
+          fi
+          sudo iptables --wait 5 --check "${_forward_chain}" \
+            --in-interface incusbr0 --jump ACCEPT 2>/dev/null \
+            || sudo iptables --wait 5 --insert "${_forward_chain}" 1 \
+              --in-interface incusbr0 --jump ACCEPT
+          sudo iptables --wait 5 --check "${_forward_chain}" \
+            --out-interface incusbr0 \
+            --match conntrack --ctstate RELATED,ESTABLISHED \
+            --jump ACCEPT 2>/dev/null \
+            || sudo iptables --wait 5 --insert "${_forward_chain}" 1 \
+              --out-interface incusbr0 \
+              --match conntrack --ctstate RELATED,ESTABLISHED \
+              --jump ACCEPT
+          sudo incus version
+          sudo incus network show incusbr0
+        }
+
+        __main "$@"
+
+    - name: Setup Incus without forwarding overrides
+      shell: bash
+      if: ${{ inputs.forward_incus != 'true' }}
+      run: |
+        __main() {
+          set -euo pipefail
+
+          sudo systemctl enable --now incus.socket
+          sudo incus admin waitready
+          sudo incus admin init --minimal
+          sudo incus version
+        }
+
+        __main "$@"
+
+    - name: Setup ORAS 1.3.3
+      uses: oras-project/setup-oras@v2.0.1
+      with:
+        version: 1.3.3
+
+    - name: Login to GHCR
+      uses: docker/login-action@v4.2.0
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ inputs.registry_token }}
+
+    - name: Pull and verify published image
+      shell: bash
+      env:
+        INPUT_IMAGE_TAG: ${{ inputs.image_tag }}
+        IMAGE_DIR_NAME: ${{ inputs.image_dir_name }}
+      run: |
+        __main() {
+          set -euo pipefail
+
+          _image_dir="${RUNNER_TEMP}/${IMAGE_DIR_NAME}"
+          mkdir "${_image_dir}"
+          oras pull --output "${_image_dir}" \
+            "ghcr.io/${GITHUB_REPOSITORY}:${INPUT_IMAGE_TAG}"
+          (
+            cd "${_image_dir}"
+            sha256sum --check SHA256SUMS
+            qemu-img check disk.qcow2
+          )
+          {
+            echo "IMAGE_TAG=${INPUT_IMAGE_TAG}"
+            echo "IMAGE_DIR=${_image_dir}"
+          } >> "${GITHUB_ENV}"
+        }
+
+        __main "$@"
+
+    - name: Allocate runner resources
+      shell: bash
+      run: |
+        __main() {
+          set -euo pipefail
+
+          _host_cpu_count=$(nproc)
+          _host_memory_kib=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)
+          _reserved_memory_kib=$((4 * 1024 * 1024))
+          _vm_memory_mib=$(((_host_memory_kib - _reserved_memory_kib) / 1024))
+          if [ "${_host_cpu_count}" -lt 1 ] || [ "${_vm_memory_mib}" -lt 1024 ]; then
+            echo "Runner has insufficient resources after reserving 4 GiB" >&2
+            return 1
+          fi
+          {
+            echo "VM_CPU_COUNT=${_host_cpu_count}"
+            echo "VM_MEMORY_MIB=${_vm_memory_mib}"
+            echo "VM_MEMORY_LIMIT=${_vm_memory_mib}MiB"
+          } >> "${GITHUB_ENV}"
+          {
+            echo "## Runner allocation"
+            echo
+            printf -- '- Runner CPUs: %s\n' "${_host_cpu_count}"
+            printf -- '- Host memory reserve: 4096 MiB\n'
+            printf -- '- VM memory limit: %s MiB\n' "${_vm_memory_mib}"
+          } >> "${GITHUB_STEP_SUMMARY}"
+        }
+
+        __main "$@"

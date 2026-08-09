@@ -1,0 +1,128 @@
+name: Test VM network on Docker default bridge
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Incus VM image tag in GHCR
+        required: false
+        default: artifact-standard-latest
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: centos7-tyy-kernel-incus-vm-docker-network-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DEFAULT_IMAGE_TAG: artifact-standard-latest
+  KERNEL_RELEASE: 6.1.0-2.3.ctl3.x86_64
+  VM_DISK_TOTAL_BYTES: "107374182400"
+
+jobs:
+  docker-network:
+    name: Published VM / Docker default bridge / dedicated DHCP
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Prepare Incus VM test environment
+        uses: ./.github/actions/incus-vm-common
+        with:
+          image_tag: ${{ github.event.inputs.image_tag || env.DEFAULT_IMAGE_TAG }}
+          image_dir_name: published-incus-docker-network-image
+          forward_incus: "false"
+          registry_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Inspect Docker bridge and allocate DHCP lease
+        shell: bash
+        run: bash scripts/prepare-docker-bridge.sh
+
+      - name: Start VM on docker0 and test DHCP networking
+        shell: bash
+        run: |
+          __cleanup() {
+            sudo incus delete --force "${_test_instance}" 2>/dev/null || true
+            sudo incus profile delete "${_test_profile}" 2>/dev/null || true
+            sudo incus image delete "${_test_image}" 2>/dev/null || true
+            if sudo test -r "${_dhcp_pid_file}"; then
+              sudo kill "$(sudo cat "${_dhcp_pid_file}")" 2>/dev/null || true
+            fi
+          }
+
+          __main() {
+            set -euo pipefail
+
+            _test_image="docker-network-centos7-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            _test_instance="${_test_image}-instance"
+            _test_profile="${_test_image}-profile"
+            _dhcp_pid_file="/run/${_test_image}-dnsmasq.pid"
+            _dhcp_lease_file="${RUNNER_TEMP}/${_test_image}-dnsmasq.leases"
+            trap __cleanup EXIT HUP INT TERM
+
+            sudo incus image import \
+              "${IMAGE_DIR}/incus.tar.xz" \
+              "${IMAGE_DIR}/disk.qcow2" \
+              --alias "${_test_image}"
+            sudo incus profile create "${_test_profile}"
+            sudo incus profile device add "${_test_profile}" root disk \
+              path=/ pool=default
+            sudo incus profile device add "${_test_profile}" eth0 nic \
+              nictype=bridged \
+              parent="${DOCKER_BRIDGE}" \
+              name=eth0 \
+              hwaddr="${DOCKER_GUEST_MAC}"
+            sudo incus init "${_test_image}" "${_test_instance}" \
+              --quiet \
+              --vm \
+              --profile "${_test_profile}" \
+              -c security.secureboot=false \
+              -c limits.cpu="${VM_CPU_COUNT}" \
+              -c limits.memory="${VM_MEMORY_LIMIT}"
+            sudo incus config device add "${_test_instance}" agent disk \
+              source=agent:config
+
+            sudo dnsmasq \
+              --conf-file=/dev/null \
+              --interface="${DOCKER_BRIDGE}" \
+              --bind-interfaces \
+              --port=0 \
+              --dhcp-authoritative \
+              --dhcp-range="${DOCKER_GUEST_IP},${DOCKER_GUEST_IP},${DOCKER_NETMASK},1h" \
+              --dhcp-host="${DOCKER_GUEST_MAC},${DOCKER_GUEST_IP}" \
+              --dhcp-option="3,${DOCKER_GATEWAY}" \
+              --dhcp-option="6,${DOCKER_DNS}" \
+              --dhcp-leasefile="${_dhcp_lease_file}" \
+              --pid-file="${_dhcp_pid_file}"
+            sudo kill -0 "$(sudo cat "${_dhcp_pid_file}")"
+            sudo incus start "${_test_instance}"
+
+            _host_nic=$(sudo incus config get \
+              "${_test_instance}" volatile.eth0.host_name)
+            test -n "${_host_nic}"
+            bridge -j link show dev "${_host_nic}" \
+              | jq -e --arg _master "${DOCKER_BRIDGE}" \
+                'length == 1 and .[0].master == $_master'
+
+            export TEST_INSTANCE="${_test_instance}"
+            export NETWORK_INTERFACE=eth0
+            export NETWORK_LABEL="Docker default bridge"
+            export NETWORK_EXPECTED_ADDRESS="${DOCKER_GUEST_ADDRESS}"
+            export NETWORK_EXPECTED_GATEWAY="${DOCKER_GATEWAY}"
+            export NETWORK_PARENT="${DOCKER_BRIDGE}"
+            export DHCP_LEASE_FILE="${_dhcp_lease_file}"
+            # GitHub-hosted runners cannot reliably reach mainland mirrors.
+            export REQUIRE_CENTOS_MIRROR=false
+            bash scripts/incus-vm-network-check.sh
+            sudo cat "${_dhcp_lease_file}"
+            sudo incus stop --force "${_test_instance}"
+          }
+
+          __main "$@"

@@ -1,0 +1,75 @@
+name: Publish stable GHCR tag
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_tag:
+        description: Immutable artifact-standard-sha-* tag to promote
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: centos7-tyy-kernel-publish-stable
+  cancel-in-progress: false
+
+env:
+  OCI_REPOSITORY: ghcr.io/${{ github.repository }}
+  ORAS_VERSION: 1.3.3
+  STABLE_TAG: artifact-standard-stable
+
+jobs:
+  publish:
+    name: Promote immutable artifact to artifact-standard-stable
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Setup ORAS ${{ env.ORAS_VERSION }}
+        uses: oras-project/setup-oras@v2.0.1
+        with:
+          version: ${{ env.ORAS_VERSION }}
+
+      - name: Login to GHCR
+        uses: docker/login-action@v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Promote immutable image to stable
+        shell: bash
+        env:
+          SOURCE_TAG: ${{ inputs.source_tag }}
+        run: |
+          __main() {
+            set -euo pipefail
+
+            _source_tag="${SOURCE_TAG}"
+            _stable_tag="${STABLE_TAG}"
+            if [[ ! "${_source_tag}" =~ ^artifact-standard-sha-[0-9a-f]{12}$ ]]; then
+              echo "source_tag must match artifact-standard-sha-<12 lowercase hex characters>" >&2
+              return 1
+            fi
+
+            _source_ref="${OCI_REPOSITORY}:${_source_tag}"
+            _source_descriptor=$(oras manifest fetch --descriptor "${_source_ref}")
+            _source_digest=$(jq -er '.digest' <<< "${_source_descriptor}")
+            oras tag "${_source_ref}" "${_stable_tag}"
+            _stable_descriptor=$(oras manifest fetch --descriptor "${OCI_REPOSITORY}:${_stable_tag}")
+            _stable_digest=$(jq -er '.digest' <<< "${_stable_descriptor}")
+            test "${_source_digest}" = "${_stable_digest}"
+
+            {
+              echo "## Published stable GHCR tag"
+              echo
+              echo "- Source: \`${_source_ref}\`"
+              echo "- Stable: \`${OCI_REPOSITORY}:${_stable_tag}\`"
+              echo "- Digest: \`${_stable_digest}\`"
+            } >> "${GITHUB_STEP_SUMMARY}"
+          }
+
+          __main "$@"

@@ -1,0 +1,475 @@
+name: Build Incus VM image
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - images/standard.yaml
+      - .github/workflows/build-images-standard.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: centos7-tyy-kernel-incus-vm-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  OCI_REPOSITORY: ghcr.io/${{ github.repository }}
+  DISTROBUILDER_VERSION: 3.3.1
+  DISTROBUILDER_CACHE_VERSION: 1
+  ORAS_VERSION: 1.3.3
+  IMAGE_DEFINITION: images/standard.yaml
+  ARCHITECTURE: amd64
+  DISTROBUILDER_ARCHITECTURE: x86_64
+  RELEASE: 7.9.2009
+  VARIANT: default
+  IMAGE_TYPE: vm
+  KERNEL_PACKAGE_VERSION: 6.1.0-2.3.ctl3
+  KERNEL_RELEASE: 6.1.0-2.3.ctl3.x86_64
+  VM_DISK_TOTAL_BYTES: "107374182400"
+  KERNEL_ARCHIVE_REF: ghcr.io/${{ github.repository }}:artifact-kernel-6.1.0-2.3.x86_64.tar.bz2
+  KERNEL_ARCHIVE_DIGEST: sha256:581e30d20286af13a2f7a6a846db7176ccb936b24295b8b6f70901a7f906ff9f
+  KERNEL_ARCHIVE_SHA256: 9e7cff72a92b96ddf52315015f3e04333c6324285a2145f50a8377cf267c8f6d
+
+jobs:
+  build:
+    name: CentOS 7.9.2009 / TYY kernel 6.1.0-2.3.ctl3.x86_64 / AMD64 / VM
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@v6.5.0
+        with:
+          go-version: "1.25.6"
+
+      - name: Cache distrobuilder ${{ env.DISTROBUILDER_VERSION }}
+        uses: actions/cache@v4.2.4
+        with:
+          path: ${{ runner.temp }}/distrobuilder-cache
+          key: distrobuilder-${{ runner.os }}-amd64-${{ env.DISTROBUILDER_VERSION }}-go1.25.6-v${{ env.DISTROBUILDER_CACHE_VERSION }}
+
+      - name: Install build and runtime dependencies
+        shell: bash
+        run: |
+          __main() {
+            set -euo pipefail
+
+            sudo apt-get update
+            sudo apt-get install --yes --no-install-recommends \
+              btrfs-progs \
+              build-essential \
+              ca-certificates \
+              dnsmasq-base \
+              dosfstools \
+              e2fsprogs \
+              fdisk \
+              gdisk \
+              gpg \
+              gpg-agent \
+              jq \
+              ovmf \
+              qemu-system-modules-spice \
+              qemu-system-x86 \
+              qemu-utils \
+              rsync \
+              squashfs-tools \
+              util-linux \
+              xz-utils \
+              zstd
+            sudo mkdir -p /etc/apt/keyrings
+            sudo curl -fsSL https://pkgs.zabbly.com/key.asc \
+              -o /etc/apt/keyrings/zabbly.asc
+            sudo tee /etc/apt/sources.list.d/zabbly-incus-stable.sources >/dev/null <<EOF
+          Enabled: yes
+          Types: deb
+          URIs: https://pkgs.zabbly.com/incus/stable
+          Suites: $(. /etc/os-release && echo "${VERSION_CODENAME}")
+          Components: main
+          Architectures: $(dpkg --print-architecture)
+          Signed-By: /etc/apt/keyrings/zabbly.asc
+          EOF
+            sudo apt-get update
+            sudo apt-get install --yes --no-install-recommends incus
+            apt-cache policy incus
+            apt-cache policy incus | grep -q 'https://pkgs.zabbly.com/incus/stable'
+          }
+
+          __main "$@"
+
+      - name: Build and install distrobuilder ${{ env.DISTROBUILDER_VERSION }}
+        shell: bash
+        env:
+          GOFLAGS: >-
+            -tags=containers_image_storage_stub,containers_image_docker_daemon_stub,containers_image_openpgp
+        run: |
+          __main() {
+            set -euo pipefail
+
+            mkdir -p "${RUNNER_TEMP}/distrobuilder-cache"
+            if [ ! -x "${RUNNER_TEMP}/distrobuilder-cache/distrobuilder" ]; then
+              GOBIN="${RUNNER_TEMP}/distrobuilder-cache" \
+                go install "github.com/lxc/distrobuilder/v3/distrobuilder@v${DISTROBUILDER_VERSION}"
+            fi
+            sudo install -m 0755 \
+              "${RUNNER_TEMP}/distrobuilder-cache/distrobuilder" \
+              /usr/local/bin/distrobuilder
+            distrobuilder --version
+          }
+
+          __main "$@"
+
+      - name: Setup Incus
+        shell: bash
+        run: |
+          __main() {
+            set -euo pipefail
+
+            sudo systemctl enable --now incus.socket
+            sudo incus admin waitready
+            sudo incus admin init --minimal
+            sudo incus version
+          }
+
+          __main "$@"
+
+      - name: Setup ORAS ${{ env.ORAS_VERSION }}
+        uses: oras-project/setup-oras@v2.0.1
+        with:
+          version: ${{ env.ORAS_VERSION }}
+
+      - name: Login to GHCR
+        uses: docker/login-action@v4.2.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull kernel artifact
+        shell: bash
+        run: |
+          __main() {
+            set -euo pipefail
+
+            _kernel_dir="${RUNNER_TEMP}/tyy-kernel-artifact"
+            mkdir -p "${_kernel_dir}"
+            _kernel_descriptor=$(oras manifest fetch --descriptor "${KERNEL_ARCHIVE_REF}")
+            test "$(jq -er '.digest' <<< "${_kernel_descriptor}")" = "${KERNEL_ARCHIVE_DIGEST}"
+            oras pull --output "${_kernel_dir}" "${KERNEL_ARCHIVE_REF}"
+            test "$(find "${_kernel_dir}" -maxdepth 1 -type f -name '*.tar.bz2' | wc -l)" = 1
+            _kernel_archive=$(find "${_kernel_dir}" -maxdepth 1 -type f -name '*.tar.bz2' -print -quit)
+            _kernel_archive_sha256=$(sha256sum "${_kernel_archive}" | awk '{print $1}')
+            test "${_kernel_archive_sha256}" = "${KERNEL_ARCHIVE_SHA256}"
+            echo "KERNEL_ARCHIVE_PATH=${_kernel_archive}" >> "${GITHUB_ENV}"
+          }
+
+          __main "$@"
+
+      - name: Stage kernel artifact for distrobuilder
+        shell: bash
+        run: |
+          __main() {
+            set -euo pipefail
+
+            # The image definition's copy generator reads this host path before chroot.
+            sudo cp -- "${KERNEL_ARCHIVE_PATH}" \
+              /var/tmp/tyy-kernel-6.1.0-2.3.x86_64.tar.bz2
+            sudo chmod 0644 /var/tmp/tyy-kernel-6.1.0-2.3.x86_64.tar.bz2
+          }
+
+          __main "$@"
+
+      - name: Validate image definition
+        shell: bash
+        run: |
+          __main() {
+            set -euo pipefail
+
+            sudo distrobuilder validate "${IMAGE_DEFINITION}"
+          }
+
+          __main "$@"
+
+      - name: Prepare build directory
+        shell: bash
+        run: |
+          __main() {
+            set -euo pipefail
+
+            echo "SERIAL=$(date -u +%Y%m%d_%H%M)" >> "${GITHUB_ENV}"
+            echo "OUTPUT_DIR=${RUNNER_TEMP}/incus-image" >> "${GITHUB_ENV}"
+            sudo mkdir -p "${RUNNER_TEMP}/incus-image/vm"
+            sudo chown -R "$(id -u):$(id -g)" "${RUNNER_TEMP}/incus-image"
+          }
+
+          __main "$@"
+
+      - name: Build Incus VM image
+        shell: bash
+        run: |
+          __main() {
+            set -euo pipefail
+
+            sudo distrobuilder build-incus "${IMAGE_DEFINITION}" "${OUTPUT_DIR}/vm" \
+              --type=split \
+              --compression=xz \
+              --vm \
+              --timeout=7200 \
+              -o image.architecture="${DISTROBUILDER_ARCHITECTURE}" \
+              -o image.release="${RELEASE}" \
+              -o image.variant="${VARIANT}" \
+              -o image.serial="${SERIAL}" \
+              -o source.url="https://vault.centos.org/"
+          }
+
+          __main "$@"
+
+      - name: Set 100 GiB VM disk size
+        shell: bash
+        run: |
+          __main() {
+            set -euo pipefail
+
+            _disk_virtual_size=$(qemu-img info --output=json --force-share \
+              "${OUTPUT_DIR}/vm/disk.qcow2" | jq -r '."virtual-size"')
+            test "${_disk_virtual_size}" = "${VM_DISK_TOTAL_BYTES}"
+          }
+
+          __main "$@"
+
+      - name: Remove staged kernel artifact
+        if: always()
+        shell: bash
+        run: sudo rm -f /var/tmp/tyy-kernel-6.1.0-2.3.x86_64.tar.bz2
+
+      - name: Normalize build files
+        shell: bash
+        run: |
+          __main() {
+            set -euo pipefail
+
+            sudo chown -R "$(id -u):$(id -g)" "${OUTPUT_DIR}"
+          }
+
+          __main "$@"
+
+      - name: Set Incus VM image requirements
+        shell: bash
+        run: |
+          __main() {
+            set -euo pipefail
+
+            _metadata_archive="${OUTPUT_DIR}/vm/incus.tar.xz"
+            _metadata_dir="${RUNNER_TEMP}/incus-metadata"
+            mkdir "${_metadata_dir}"
+            tar -xJf "${_metadata_archive}" -C "${_metadata_dir}"
+            ruby -ryaml -e '
+              _path = ARGV.fetch(0)
+              _metadata = YAML.safe_load_file(_path)
+              _metadata["properties"] ||= {}
+              _metadata["properties"]["requirements.cdrom_agent"] = "true"
+              _metadata["properties"]["requirements.secureboot"] = "false"
+              File.write(_path, YAML.dump(_metadata))
+            ' "${_metadata_dir}/metadata.yaml"
+
+            _metadata_entries=(metadata.yaml)
+            if [ -d "${_metadata_dir}/templates" ]; then
+              _metadata_entries+=(templates)
+            fi
+            tar -cJf "${_metadata_archive}.new" \
+              -C "${_metadata_dir}" "${_metadata_entries[@]}"
+            mv "${_metadata_archive}.new" "${_metadata_archive}"
+          }
+
+          __main "$@"
+
+      - name: Test Incus VM image
+        shell: bash
+        run: |
+          __cleanup() {
+            sudo incus delete --force "${_test_instance}" 2>/dev/null || true
+            sudo incus image delete "${_test_image}" 2>/dev/null || true
+          }
+
+          __diagnose() {
+            sudo incus list "${_test_instance}" --format=yaml || true
+            sudo incus info "${_test_instance}" --show-log || true
+            sudo incus console "${_test_instance}" --show-log || true
+            sudo journalctl --no-pager --unit=incus -n 200 || true
+          }
+
+          __fail() {
+            __diagnose
+            exit 1
+          }
+
+          __main() {
+            set -euo pipefail
+
+            _test_image="ci-centos7-tyy-kernel-vm-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            _test_instance="${_test_image}-instance"
+            trap __cleanup EXIT HUP INT TERM
+
+            qemu-img check "${OUTPUT_DIR}/vm/disk.qcow2"
+            _disk_virtual_size=$(qemu-img info \
+              --output=json \
+              --force-share \
+              "${OUTPUT_DIR}/vm/disk.qcow2" | jq -r '."virtual-size"')
+            test "${_disk_virtual_size}" = "${VM_DISK_TOTAL_BYTES}"
+            sudo incus image import \
+              "${OUTPUT_DIR}/vm/incus.tar.xz" \
+              "${OUTPUT_DIR}/vm/disk.qcow2" \
+              --alias "${_test_image}"
+            sudo incus image list "${_test_image}" --format=json \
+              | jq -e '
+                length == 1
+                and .[0].type == "virtual-machine"
+                and .[0].properties["requirements.cdrom_agent"] == "true"
+                and .[0].properties["requirements.secureboot"] == "false"
+              '
+
+            sudo incus init "${_test_image}" "${_test_instance}" \
+              --quiet \
+              --vm \
+              -c security.secureboot=false \
+              -c limits.cpu=2 \
+              -c limits.memory=2GiB
+            sudo incus config device add "${_test_instance}" agent disk \
+              source=agent:config
+            sudo incus start "${_test_instance}"
+
+            _ready=false
+            set +e
+            for _attempt in $(seq 1 120); do
+              sudo incus exec "${_test_instance}" -- sh -c "test -f /etc/os-release" >/dev/null 2>&1
+              _agent_status=$?
+              if [ "${_agent_status}" -eq 0 ]; then
+                _ready=true
+                break
+              fi
+              sleep 5
+            done
+            set -e
+
+            test "${_ready}" = true || __fail
+            sudo incus exec "${_test_instance}" -- grep -qx 'ID="centos"' /etc/os-release || __fail
+            sudo incus exec "${_test_instance}" -- grep -qx 'VERSION_ID="7"' /etc/os-release || __fail
+
+            if ! _guest_arch=$(sudo incus exec "${_test_instance}" -- uname -m); then
+              __fail
+            fi
+            test "${_guest_arch}" = x86_64 || __fail
+
+            if ! _guest_kernel=$(sudo incus exec "${_test_instance}" -- uname -r); then
+              __fail
+            fi
+            test "${_guest_kernel}" = "${KERNEL_RELEASE}" || __fail
+
+            sudo incus exec "${_test_instance}" -- \
+              rpm -q "kernel-${KERNEL_PACKAGE_VERSION}.x86_64" || __fail
+
+            sudo incus exec "${_test_instance}" -- \
+              test -f "/boot/vmlinuz-${KERNEL_RELEASE}" || __fail
+            if ! _default_kernel=$(sudo incus exec "${_test_instance}" -- grubby --default-kernel); then
+              __fail
+            fi
+            test "${_default_kernel}" = "/boot/vmlinuz-${KERNEL_RELEASE}" || __fail
+
+            sudo incus exec "${_test_instance}" -- \
+              grep -qx 'kernel/drivers/scsi/virtio_scsi.ko' \
+                "/lib/modules/${KERNEL_RELEASE}/modules.builtin" || __fail
+            sudo incus exec "${_test_instance}" -- modinfo virtiofs >/dev/null || __fail
+            sudo incus exec "${_test_instance}" -- \
+              sh -c 'test "$(findmnt -n -o FSTYPE --target /)" = ext4 && test "$(findmnt -n -o SOURCE --target /)" != ""' \
+              || __fail
+            sudo incus exec "${_test_instance}" -- sh -c '
+              set -eux
+              _root_source=$(findmnt -n -o SOURCE --target /)
+              _root_device=$(readlink -f "${_root_source}")
+              _root_device_name=${_root_device##*/}
+              test "$(cat "/sys/class/block/${_root_device_name}/partition")" = 2
+              _parent_name=$(lsblk -n -o PKNAME "${_root_source}" | head -n 1)
+              test -n "${_parent_name}"
+              _partition_layout=$(lsblk -nr -o TYPE,PARTN "/dev/${_parent_name}" \
+                | awk '\''$1 == "part" {print $2}'\'' | sort -n | xargs)
+              test "${_partition_layout}" = "1 2"
+            ' || __fail
+            sudo incus exec "${_test_instance}" -- \
+              sh -c 'ip -4 -o addr show scope global | grep -q . && ip -4 route show default | grep -q "^default "' \
+              || __fail
+            sudo incus exec "${_test_instance}" -- \
+              sh -c 'test "$(find /etc/yum.repos.d -maxdepth 1 -type f -name "*.repo" -printf "%f\n")" = CentOS-Base.repo' \
+              || __fail
+            sudo incus exec "${_test_instance}" -- \
+              sh -c 'grep -Fq "mirrors.cloud.tencent.com/centos-vault/7.9.2009" /etc/yum.repos.d/CentOS-Base.repo && ! grep -Fq "vault.centos.org" /etc/yum.repos.d/CentOS-Base.repo' \
+              || __fail
+
+            sudo incus stop --force "${_test_instance}"
+          }
+
+          __main "$@"
+
+      - name: Write checksums
+        shell: bash
+        run: |
+          __main() {
+            set -euo pipefail
+
+            (
+              cd "${OUTPUT_DIR}/vm"
+              sha256sum incus.tar.xz disk.qcow2 > SHA256SUMS
+            )
+          }
+
+          __main "$@"
+
+      - name: Publish Incus VM image to GHCR with ORAS
+        shell: bash
+        env:
+          ORAS_ARTIFACT_TYPE_VM: application/vnd.linuxcontainers.incus.virtual-machine-image.v1
+          ORAS_METADATA_TYPE: application/vnd.linuxcontainers.incus.metadata.v1+tar+xz
+          ORAS_DISK_TYPE: application/vnd.linuxcontainers.incus.disk.v1+qcow2
+          ORAS_CHECKSUM_TYPE: text/plain
+        run: |
+          __main() {
+            set -euo pipefail
+
+            _image_file_name="${IMAGE_DEFINITION##*/}"
+            _image_name="${_image_file_name%.yaml}"
+            _full_sha=$(git rev-parse HEAD)
+            _short_sha="${_full_sha:0:12}"
+            _revision_tag="artifact-${_image_name}-sha-${_short_sha}"
+            _latest_tag="artifact-${_image_name}-latest"
+            (
+              cd "${OUTPUT_DIR}/vm"
+              oras push \
+                --artifact-type "${ORAS_ARTIFACT_TYPE_VM}" \
+                --annotation "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+                --annotation "org.opencontainers.image.revision=${GITHUB_SHA}" \
+                --annotation "org.opencontainers.image.version=${SERIAL}" \
+                --annotation "io.github.lwmacct.kernel.release=${KERNEL_RELEASE}" \
+                "${OCI_REPOSITORY}:${_revision_tag}" \
+                "incus.tar.xz:${ORAS_METADATA_TYPE}" \
+                "disk.qcow2:${ORAS_DISK_TYPE}" \
+                "SHA256SUMS:${ORAS_CHECKSUM_TYPE}"
+            )
+            oras tag "${OCI_REPOSITORY}:${_revision_tag}" "${_latest_tag}"
+            {
+              echo "## Published Incus VM image"
+              echo
+              echo "- \`${OCI_REPOSITORY}:${_latest_tag}\`"
+              echo "- \`${OCI_REPOSITORY}:${_revision_tag}\`"
+            } >> "${GITHUB_STEP_SUMMARY}"
+          }
+
+          __main "$@"
