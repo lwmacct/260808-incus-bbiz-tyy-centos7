@@ -70,8 +70,15 @@ __check_guest_storage() {
       test -n "${_parent_name}"
       _parent_device=/dev/${_parent_name}
       test "$(blockdev --getsize64 "${_parent_device}")" = "${VM_DISK_TOTAL_BYTES}"
-      _partition_layout=$(lsblk -nr -o TYPE,PARTN "${_parent_device}" \
-        | awk '$1 == "part" {print $2}' | sort -n | xargs)
+      # CentOS 7 util-linux lacks the PARTN lsblk column; derive the number
+      # from each partition device name instead.
+      _partition_layout=$(lsblk -nr -o TYPE,NAME "${_parent_device}" \
+        | while read -r _type _name; do
+            [ "${_type}" = part ] || continue
+            _part_number=${_name##*[!0-9]}
+            printf '%s\n' "${_part_number}"
+          done \
+        | sort -n | xargs)
       test "${_partition_layout}" = "1 2"
       test "$(findmnt -n -o FSTYPE --target /)" = ext4
       _test_file=/root/.incus-network-write-test

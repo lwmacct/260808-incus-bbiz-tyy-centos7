@@ -401,8 +401,13 @@ jobs:
               test "$(cat "/sys/class/block/${_root_device_name}/partition")" = 2
               _parent_name=$(lsblk -n -o PKNAME "${_root_source}" | head -n 1)
               test -n "${_parent_name}"
-              _partition_layout=$(lsblk -nr -o TYPE,PARTN "/dev/${_parent_name}" \
-                | awk '\''$1 == "part" {print $2}'\'' | sort -n | xargs)
+              _partition_layout=$(lsblk -nr -o TYPE,NAME "/dev/${_parent_name}" \
+                | while read -r _type _name; do
+                    [ "${_type}" = part ] || continue
+                    _part_number=${_name##*[!0-9]}
+                    printf '%s\n' "${_part_number}"
+                  done \
+                | sort -n | xargs)
               test "${_partition_layout}" = "1 2"
             ' || __fail
             sudo incus exec "${_test_instance}" -- \
