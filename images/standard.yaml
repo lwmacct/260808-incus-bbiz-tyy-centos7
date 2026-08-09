@@ -69,8 +69,8 @@ targets:
     - type: all
       content: |-
         lxc.arch = {{ image.architecture_kernel }}
-    incus:
-      vm:
+  incus:
+    vm:
       # The image contains only an EFI partition and a root partition.
       size: 107374182400
       filesystem: ext4
