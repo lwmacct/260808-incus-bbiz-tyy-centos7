@@ -385,9 +385,10 @@ jobs:
             fi
             test "${_default_kernel}" = "/boot/vmlinuz-${KERNEL_RELEASE}" || __fail
 
+            # The TYY kernel ships virtio_scsi as a module (not built-in); verify
+            # the installed module metadata instead of assuming modules.builtin.
             sudo incus exec "${_test_instance}" -- \
-              grep -qx 'kernel/drivers/scsi/virtio_scsi.ko' \
-                "/lib/modules/${KERNEL_RELEASE}/modules.builtin" || __fail
+              modinfo virtio_scsi >/dev/null || __fail
             sudo incus exec "${_test_instance}" -- modinfo virtiofs >/dev/null || __fail
             sudo incus exec "${_test_instance}" -- \
               sh -c 'test "$(findmnt -n -o FSTYPE --target /)" = ext4 && test "$(findmnt -n -o SOURCE --target /)" != ""' \

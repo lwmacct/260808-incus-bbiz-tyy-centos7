@@ -106,7 +106,7 @@ files:
 - path: /etc/sysconfig/network-scripts/ifcfg-eth0
   generator: template
   content: |-
-    DEVICE=enp5s0
+    DEVICE=eth0
     BOOTPROTO=dhcp
     ONBOOT=yes
     HOSTNAME={{ container.name }}
