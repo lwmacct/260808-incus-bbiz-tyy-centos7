@@ -405,7 +405,7 @@ jobs:
                 | while read -r _type _name; do
                     [ "${_type}" = part ] || continue
                     _part_number=${_name##*[!0-9]}
-                    printf '%s\n' "${_part_number}"
+                    echo "${_part_number}"
                   done \
                 | sort -n | xargs)
               test "${_partition_layout}" = "1 2"
