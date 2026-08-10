@@ -377,6 +377,16 @@ jobs:
             test "${_guest_kernel}" = "${KERNEL_RELEASE}" || __fail
 
             sudo incus exec "${_test_instance}" -- \
+              grep -qx 'CONFIG_BPF_LSM=y' "/boot/config-${KERNEL_RELEASE}" || __fail
+            sudo incus exec "${_test_instance}" -- \
+              test -s /sys/kernel/btf/vmlinux || __fail
+            sudo incus exec "${_test_instance}" -- sh -c '
+              set -eux
+              test -r /sys/kernel/security/lsm
+              grep -Eq '"'"'(^|,)bpf(,|$)'"'"' /sys/kernel/security/lsm
+            ' || __fail
+
+            sudo incus exec "${_test_instance}" -- \
               rpm -q "kernel-${KERNEL_PACKAGE_VERSION}.x86_64" || __fail
 
             sudo incus exec "${_test_instance}" -- \
