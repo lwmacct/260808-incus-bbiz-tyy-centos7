@@ -365,6 +365,8 @@ jobs:
             test "${_ready}" = true || __fail
             sudo incus exec "${_test_instance}" -- grep -qx 'ID="centos"' /etc/os-release || __fail
             sudo incus exec "${_test_instance}" -- grep -qx 'VERSION_ID="7"' /etc/os-release || __fail
+            sudo incus exec "${_test_instance}" -- \
+              sh -c 'test "$(getenforce)" = Disabled' || __fail
 
             if ! _guest_arch=$(sudo incus exec "${_test_instance}" -- uname -m); then
               __fail

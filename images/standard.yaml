@@ -444,7 +444,7 @@ actions:
       else
         printf '%s\n' SELINUX=disabled SELINUXTYPE=targeted > /etc/selinux/config
       fi
-      grep SELINUX= /etc/selinux/config
+      grep -qx 'SELINUX=disabled' /etc/selinux/config
       __reset_machine_id
 
       systemctl enable NetworkManager.service
