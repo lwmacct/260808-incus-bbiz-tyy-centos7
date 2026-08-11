@@ -31,7 +31,7 @@ env:
   IMAGE_TYPE: vm
   KERNEL_PACKAGE_VERSION: 6.1.0-2.3.ctl3
   KERNEL_RELEASE: 6.1.0-2.3.ctl3.x86_64
-  VM_DISK_TOTAL_BYTES: "107374182400"
+  VM_DISK_TOTAL_BYTES: "214748364800"
   KERNEL_ARCHIVE_REF: ghcr.io/${{ github.repository }}:artifact-kernel-6.1.0-2.3.x86_64.tar.bz2
   KERNEL_ARCHIVE_DIGEST: sha256:581e30d20286af13a2f7a6a846db7176ccb936b24295b8b6f70901a7f906ff9f
   KERNEL_ARCHIVE_SHA256: 9e7cff72a92b96ddf52315015f3e04333c6324285a2145f50a8377cf267c8f6d
@@ -235,7 +235,7 @@ jobs:
 
           __main "$@"
 
-      - name: Set 100 GiB VM disk size
+      - name: Verify 200 GiB VM disk size
         shell: bash
         run: |
           __main() {
@@ -427,6 +427,14 @@ jobs:
             sudo incus exec "${_test_instance}" -- \
               sh -c 'test "$(find /etc/yum.repos.d -maxdepth 1 -type f -name "*.repo" -printf "%f\n")" = CentOS-Base.repo' \
               || __fail
+            sudo incus exec "${_test_instance}" -- \
+              rpm -q containerd.io docker-buildx-plugin docker-ce docker-ce-cli \
+                docker-compose-plugin jq dmidecode pciutils || __fail
+            sudo incus exec "${_test_instance}" -- docker --version || __fail
+            sudo incus exec "${_test_instance}" -- docker buildx version || __fail
+            sudo incus exec "${_test_instance}" -- docker compose version || __fail
+            sudo incus exec "${_test_instance}" -- \
+              systemctl --quiet is-enabled docker.service || __fail
             sudo incus exec "${_test_instance}" -- \
               sh -c 'grep -Fq "mirrors.cloud.tencent.com/centos-vault/7.9.2009" /etc/yum.repos.d/CentOS-Base.repo && ! grep -Fq "vault.centos.org" /etc/yum.repos.d/CentOS-Base.repo' \
               || __fail

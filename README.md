@@ -7,7 +7,8 @@
 - 架构：`amd64`（内核和 distrobuilder 使用 `x86_64`）
 - 内核 RPM：TYY Cloud `6.1.0-2.3.ctl3`
 - 运行内核：`6.1.0-2.3.ctl3.x86_64`
-- 默认磁盘：`100 GiB`，仅包含 EFI 和根分区
+- 默认磁盘：`200 GiB`，仅包含 EFI 和根分区
+- 预装工具：Docker Engine、Docker Compose、Buildx、`jq`、`dmidecode`、`pciutils`
 - 类型：仅 VM
 - 产物：`incus.tar.xz`、`disk.qcow2`、`SHA256SUMS`
 
@@ -46,12 +47,12 @@ VM 启动后，workflow 会精确验证 `uname -r` 为
 
 ## 默认磁盘布局
 
-成品 `disk.qcow2` 的虚拟容量固定为 `100 GiB`，只包含第 1 个 `100 MiB` EFI
+成品 `disk.qcow2` 的虚拟容量固定为 `200 GiB`，只包含第 1 个 `100 MiB` EFI
 分区和第 2 个 ext4 根分区。根分区占用磁盘剩余空间，不创建独立数据分区或
 不创建独立数据挂载点。
 
-该虚拟容量也是 Incus 创建实例时的最小根盘容量；显式配置小于 `100 GiB` 的
-实例或存储池 volume size 会被拒绝。把实例根盘扩大到 `100 GiB` 以上后，新增空间
+该虚拟容量也是 Incus 创建实例时的最小根盘容量；显式配置小于 `200 GiB` 的
+实例或存储池 volume size 会被拒绝。把实例根盘扩大到 `200 GiB` 以上后，新增空间
 与根分区相邻，可用于扩展根分区和根文件系统；镜像不会自动执行扩容。
 
 独立网络 workflow 会把 runner 的全部可用 CPU 分配给 VM，并把总内存减去

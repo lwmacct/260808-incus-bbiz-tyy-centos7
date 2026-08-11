@@ -2,7 +2,7 @@
 
 本仓库通过 [Build Incus VM image](../.github/workflows/build-images-standard.yml)
 workflow 构建、启动验证并发布 CentOS 7.9.2009 AMD64 Incus VM 镜像。成品内核
-固定为 TYY Cloud `6.1.0-2.3.ctl3.x86_64`，默认磁盘容量为 `100 GiB`。
+固定为 TYY Cloud `6.1.0-2.3.ctl3.x86_64`，默认磁盘容量为 `200 GiB`。
 
 网络方案、DHCP 限制和故障排查经验见 [`docs/network.md`](network.md)。
 
@@ -32,7 +32,7 @@ CentOS Linux 7.9.2009 / tyy-kernel 6.1.0-2.3.ctl3.x86_64 / amd64 / default / VM
 1. 在 GitHub `ubuntu-24.04` AMD64 runner 上配置 Zabbly Incus stable，安装 Incus、QEMU、OVMF 和构建依赖。
 2. 编译并缓存固定版本的 `distrobuilder v3.3.1`。
 3. 验证 `images/standard.yaml`，从官方 CentOS Vault 下载并校验 Minimal ISO。
-4. 从 GHCR 拉取固定 kernel artifact，并将归档暂存到 runner 文件系统；distrobuilder 的 `copy` generator 在进入 chroot 前把它注入 rootfs。随后使用 `distrobuilder build-incus --vm --type=split` 构建 `100 GiB` 镜像，构建期间所有 CentOS 包使用官方 Vault。
+4. 从 GHCR 拉取固定 kernel artifact，并将归档暂存到 runner 文件系统；distrobuilder 的 `copy` generator 在进入 chroot 前把它注入 rootfs。随后使用 `distrobuilder build-incus --vm --type=split` 构建 `200 GiB` 镜像，构建期间所有 CentOS 包使用官方 Vault。
 5. 校验 kernel 归档和 RPM 的固定 SHA-256。
 6. 安装内核，显式运行 `depmod`、`dracut` 和 grub 配置，并把该版本设为默认内核。
 7. 输出 Incus 元数据和 qcow2 磁盘文件；磁盘只保留 EFI 和根两个分区。
@@ -58,7 +58,7 @@ Incus/QEMU 管理进程保留 `4 GiB`。
 网络实验依次验证：
 
 1. Incus agent 和固定内核可以正常启动。
-2. 总磁盘为 `100 GiB`，只包含 EFI 和 ext4 根分区，根分区可以读写。
+2. 总磁盘为 `200 GiB`，只包含 EFI 和 ext4 根分区，根分区可以读写。
 3. VM 中在线 CPU 数和内存容量符合动态资源分配。
 4. VM 通过 DHCP 获得全局 IPv4 地址和默认路由。
 5. VM 可以访问桥接网关，runner 宿主也可以访问 VM IPv4。
@@ -120,7 +120,7 @@ RPM 摘要，并不启用额外内核 yum 源。RPM 的 release 使用点号 `2.
 
 ## 默认磁盘布局
 
-`distrobuilder v3.3.1` 直接生成 `100 GiB` 磁盘，包含 EFI 和 ext4 根两个分区；
+`distrobuilder v3.3.1` 直接生成 `200 GiB` 磁盘，包含 EFI 和 ext4 根两个分区；
 构建 workflow 不再执行额外 qcow2 分区重排或数据分区格式化。
 
 ## Incus 兼容性

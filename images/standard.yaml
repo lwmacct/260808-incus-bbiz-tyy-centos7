@@ -72,7 +72,7 @@ targets:
   incus:
     vm:
       # The image contains only an EFI partition and a root partition.
-      size: 107374182400
+      size: 214748364800
       filesystem: ext4
 
 files:
@@ -177,11 +177,15 @@ packages:
     - cronie
     - bzip2
     - curl
+    - dmidecode
+    - epel-release
     - hostname
     - initscripts
     - iproute
+    - jq
     - openssh-clients
     - passwd
+    - pciutils
     - policycoreutils
     - rootfiles
     - sudo
@@ -208,6 +212,16 @@ packages:
     - vm
 
   - packages:
+    - containerd.io
+    - docker-buildx-plugin
+    - docker-ce
+    - docker-ce-cli
+    - docker-compose-plugin
+    action: install
+    types:
+    - vm
+
+  - packages:
     - selinux-policy
     - selinux-policy-targeted
     action: remove
@@ -219,6 +233,9 @@ actions:
 
     __main() {
       set -eux
+
+      _docker_key=/etc/pki/rpm-gpg/RPM-GPG-KEY-Docker
+      _docker_key_sha256=e6c650e0700b1bf4868b693b30761b926844befc8a0acb7ac0dd9b1faf1b7423
 
       touch /etc/hosts /etc/hostname
 
@@ -245,6 +262,25 @@ actions:
     enabled=1
     gpgcheck=1
     gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-centosofficial
+    EOF
+
+      # jq is supplied by EPEL 7. The retired EPEL metalink resolves to its
+      # archive, while Docker's CentOS 7 repository supplies its final releases.
+      yum -y install ca-certificates curl epel-release
+      curl -fsSL --retry 3 --retry-delay 2 \
+        -o "${_docker_key}" \
+        https://download.docker.com/linux/centos/gpg
+      printf '%s  %s\n' "${_docker_key_sha256}" "${_docker_key}" \
+        | sha256sum --check --strict
+      rpm --import "${_docker_key}"
+
+      cat > /etc/yum.repos.d/docker-ce.repo <<'EOF'
+    [docker-ce-stable]
+    name=Docker CE Stable - $basearch
+    baseurl=https://download.docker.com/linux/centos/7/$basearch/stable
+    enabled=1
+    gpgcheck=1
+    gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-Docker
     EOF
     }
 
@@ -402,6 +438,11 @@ actions:
       __install_tyy_kernel
       __configure_boot
       __configure_runtime_repositories
+      rpm -q containerd.io docker-buildx-plugin docker-ce docker-ce-cli \
+        docker-compose-plugin jq dmidecode pciutils
+      docker --version
+      docker buildx version
+      docker compose version
       mkdir -p /etc/selinux
       if [ -f /etc/selinux/config ]; then
         sed -i 's/^SELINUX=.*/SELINUX=disabled/' /etc/selinux/config
@@ -412,6 +453,7 @@ actions:
       __reset_machine_id
 
       systemctl enable NetworkManager.service
+      systemctl enable docker.service
       systemctl enable incus-agent-workaround.service
       rm -Rf /var/lib/selinux/*
       systemctl mask systemd-firstboot.service

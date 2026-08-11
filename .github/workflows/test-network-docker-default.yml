@@ -19,7 +19,7 @@ concurrency:
 env:
   DEFAULT_IMAGE_TAG: artifact-standard-latest
   KERNEL_RELEASE: 6.1.0-2.3.ctl3.x86_64
-  VM_DISK_TOTAL_BYTES: "107374182400"
+  VM_DISK_TOTAL_BYTES: "214748364800"
 
 jobs:
   docker-network:
