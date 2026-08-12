@@ -181,6 +181,7 @@ packages:
     - epel-release
     - hostname
     - initscripts
+    - ipmitool
     - iproute
     - jq
     - openssh-clients
